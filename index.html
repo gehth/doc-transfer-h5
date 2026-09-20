@@ -33,6 +33,8 @@
     /* 与小程序「点击选择文件」对齐：30rpx / 600 字重（rpx→vw 等比，最大 20px） */
     h1 {
       margin:0 0 8px;
+      /* 先给不支持 CSS min() 的老内核一个正常值，再被下一行覆盖 */
+      font-size:17px;
       font-size:min(4vw, 20px);
       line-height:1.4;
       font-weight:600;
