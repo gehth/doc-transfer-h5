@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>从手机文件夹选择</title>
+  <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin:0; padding:24px; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; background:#f5f6f8; color:#1f2329; }
+    @media (prefers-color-scheme: dark) {
+      body { background:#111214; color:#e8eaed; }
+      .card { background:#1c1d1f; box-shadow:none; }
+      p, .meta { color:#9aa0a6; }
+      .tip { background:#1f2a3d; color:#8ab4f8; }
+    }
+    .card { background:#fff; border-radius:14px; padding:20px; box-shadow:0 2px 12px rgba(0,0,0,.05); }
+    h1 { font-size:18px; margin:0 0 8px; }
+    p { color:#6b7075; font-size:13px; line-height:1.7; margin:8px 0; }
+    .pick { display:block; margin-top:16px; text-align:center; padding:16px; background:#2b7aef; color:#fff; border-radius:12px; font-weight:600; }
+    .pick.disabled { opacity:.5; }
+    input[type=file] { display:none; }
+    #status { margin-top:16px; font-size:13px; color:#2b7aef; word-break:break-all; min-height:18px; }
+    #status.err { color:#e54545; }
+    .meta { margin-top:12px; font-size:12px; color:#8a9099; }
+    .tip { margin-top:16px; padding:12px 14px; border-radius:10px; background:#eef4ff; color:#2b6ad0; font-size:12px; line-height:1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>从手机文件夹选择文件</h1>
+    <p>点下方按钮选择手机里的文件，上传后会自动返回小程序进行转换。</p>
+
+    <label class="pick" for="file" id="pickBtn">选择手机文件</label>
+    <input type="file" id="file">
+
+    <div id="status"></div>
+    <div class="meta" id="meta"></div>
+
+    <div class="tip">
+      支持文档 / 图像 / 音频 / 视频 / 电子书 / 压缩包；单个文件不超过 <b>10&nbsp;MB</b>（服务端以 base64 转发，超出会失败）。
+      也可以直接回到小程序，用「从聊天记录选择」——把文件先发到任意聊天即可。
+    </div>
+  </div>
+
+  <script>
+    // 上传地址优先从 URL 参数 upload 读取 —— 小程序会按 config/env.js 的
+    // uploadFromWebUrl 注入，因此【本文件部署后不需要修改】。
+    // 只有单独打开本页调试时，才需要填下面的兜底常量。
+    var FALLBACK_UPLOAD_URL = "";
+    function query(name) {
+      var m = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
+      return m ? decodeURIComponent(m[1]) : "";
+    }
+    var UPLOAD_URL = query("upload") || FALLBACK_UPLOAD_URL;
+
+    var MAX_SIZE = 10 * 1024 * 1024;
+    var busy = false;
+
+    function el(id) { return document.getElementById(id); }
+    function setStatus(s, isErr) {
+      var n = el("status");
+      n.textContent = s || "";
+      n.className = isErr ? "err" : "";
+    }
+    function setMeta(s) { el("meta").textContent = s || ""; }
+    function human(bytes) {
+      if (bytes == null) return "";
+      var u = ["B", "KB", "MB", "GB"], n = bytes, i = 0;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return (i === 0 || n >= 10 ? n.toFixed(0) : n.toFixed(1)) + u[i];
+    }
+    function guard() {
+      if (!UPLOAD_URL) {
+        setStatus(
+          "尚未拿到上传地址：它应由小程序通过 ?upload=... 传入。" +
+          "请在小程序 config/env.js 里填写 uploadFromWebUrl 后重新进入本页（见 h5/README.md）。",
+          true
+        );
+        el("pickBtn").className = "pick disabled";
+        return false;
+      }
+      return true;
+    }
+
+    if (guard()) {
+      el("file").addEventListener("change", function (e) {
+        if (busy) return;
+        var f = e.target.files && e.target.files[0];
+        if (!f) return;
+
+        if (f.size > MAX_SIZE) {
+          setStatus("文件过大（" + human(f.size) + "），上限 10 MB。请压缩后再试，或改用「从聊天记录选择」。", true);
+          e.target.value = "";
+          return;
+        }
+
+        busy = true;
+        el("pickBtn").className = "pick disabled";
+        setStatus("读取中…");
+        setMeta(f.name + " · " + human(f.size));
+
+        var reader = new FileReader();
+        reader.onerror = function () {
+          busy = false; el("pickBtn").className = "pick";
+          setStatus("读取文件失败，请重试。", true);
+        };
+        reader.onload = function () {
+          var s = String(reader.result || "");
+          var b64 = s.indexOf(",") >= 0 ? s.slice(s.indexOf(",") + 1) : s;
+          setStatus("上传中…");
+
+          // 用 text/plain 避免 CORS 预检
+          fetch(UPLOAD_URL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({ name: f.name, dataBase64: b64 })
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              if (!res || !res.ok) {
+                busy = false; el("pickBtn").className = "pick";
+                setStatus("上传失败：" + ((res && res.error) || "未知错误"), true);
+                return;
+              }
+              setStatus("上传成功，正在返回小程序…");
+              wx.miniProgram.redirectTo({
+                url: "/pages/convert/convert?fileID=" + encodeURIComponent(res.fileID)
+                   + "&name=" + encodeURIComponent(res.name)
+                   + "&size=" + (res.size || 0)
+              });
+            })
+            .catch(function (err) {
+              busy = false; el("pickBtn").className = "pick";
+              setStatus("上传失败：" + (err && err.message ? err.message : err), true);
+            });
+        };
+        reader.readAsDataURL(f);
+      });
+    }
+  </script>
+</body>
+</html>
