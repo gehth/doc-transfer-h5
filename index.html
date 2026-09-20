@@ -41,13 +41,23 @@
       color:#1f2329;
     }
     p { color:#6b7075; font-size:13px; line-height:1.7; margin:8px 0 0; }
+    /* 选文件的按钮：把一个【透明但可点】的 file input 盖在按钮上。
+       为什么不用 display:none + label：安卓微信内嵌网页（XWeb）里，
+       点击 label 触发的 hidden input 有时不弹选择器，直接点 input 最稳。 */
+    .pick-wrap { position:relative; margin-top:16px; height:52px; }
     .pick {
-      display:block; margin-top:16px; text-align:center; padding:15px 16px;
+      position:absolute; left:0; right:0; top:0; bottom:0;
+      display:flex; align-items:center; justify-content:center;
       background:#2b7aef; color:#ffffff; border-radius:12px;
-      font-size:16px; font-weight:600; user-select:none; cursor:pointer;
+      font-size:16px; font-weight:600; user-select:none;
     }
-    .pick.disabled { opacity:.5; pointer-events:none; }
-    input[type=file] { display:none; }
+    .pick.disabled { opacity:.5; }
+    .file-overlay {
+      position:absolute; left:0; top:0; width:100%; height:100%;
+      opacity:0; z-index:2; cursor:pointer; font-size:0;
+      -webkit-appearance:none; appearance:none; border:0; padding:0; background:transparent;
+    }
+    .file-overlay.disabled { pointer-events:none; }
     #status { margin-top:14px; font-size:13px; color:#2b7aef; word-break:break-all; min-height:18px; }
     #status.err { color:#e54545; }
     .meta { margin-top:10px; font-size:12px; color:#8a9099; word-break:break-all; }
@@ -63,8 +73,10 @@
       <h1>从手机文件夹选择文件</h1>
       <p>点下方按钮选择手机里的文件，上传后会自动返回小程序进行转换。</p>
 
-      <label class="pick" for="file" id="pickBtn">选择手机文件</label>
-      <input type="file" id="file">
+      <div class="pick-wrap">
+        <div class="pick" id="pickBtn">选择手机文件</div>
+        <input type="file" id="file" class="file-overlay" aria-label="选择手机文件">
+      </div>
 
       <div id="status"></div>
       <div class="bar" id="bar"><span id="barIn"></span></div>
@@ -115,7 +127,12 @@
       while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
       return (i === 0 || n >= 10 ? n.toFixed(0) : n.toFixed(1)) + u[i];
     }
-    function reset() { busy = false; el("pickBtn").className = "pick"; }
+    function setPickEnabled(on) {
+      el("pickBtn").className = on ? "pick" : "pick disabled";
+      el("file").className = on ? "file-overlay" : "file-overlay disabled";
+      el("file").disabled = !on;
+    }
+    function reset() { busy = false; setPickEnabled(true); }
     function newId() {
       var s = "";
       var chars = "abcdef0123456789";
@@ -164,7 +181,7 @@
         "请在小程序 config/env.js 里填写 uploadFromWebUrl 后重新进入本页（见 h5/README.md）。",
         true
       );
-      el("pickBtn").className = "pick disabled";
+      setPickEnabled(false);
     } else {
       el("file").addEventListener("change", function (e) {
         if (busy) return;
@@ -179,7 +196,7 @@
         if (!f.size) { setStatus("文件是空的，换一个吧。", true); return; }
 
         busy = true;
-        el("pickBtn").className = "pick disabled";
+        setPickEnabled(false);
         setMeta(f.name + " · " + human(f.size));
 
         // 小文件走一次性上传（少一次往返）；大文件切片，绕开云函数 3 秒执行超时
